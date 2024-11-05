@@ -35,17 +35,22 @@ def eval_model(args):
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
+    _,_,image_processor,_= load_pretrained_model("microsoft/llava-med-v1.5-mistral-7b", None, "llava-med-v1.5-mistral-7b")
+    tokenizer, model, _, context_len = load_pretrained_model(model_path, args.model_base, model_name)
 
     questions = [json.loads(q) for q in open(os.path.expanduser(args.question_file), "r")]
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)
     ans_file = open(answers_file, "w")
+    question_id = 0
+    model.get_vision_tower().load_model()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     for line in tqdm(questions):
-        idx = line["question_id"]
-        image_file = line["image"]
-        qs = line["text"].replace(DEFAULT_IMAGE_TOKEN, '').strip()
+        # idx = line["question_id"]
+        image_file = line["images"][0]
+        qs = line["conversations"][0]['value'].replace(DEFAULT_IMAGE_TOKEN, '').strip()
         cur_prompt = qs
         if model.config.mm_use_im_start_end:
             qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
@@ -60,7 +65,18 @@ def eval_model(args):
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
 
         image = Image.open(os.path.join(args.image_folder, image_file))
-        image_tensor = process_images([image], image_processor, model.config)[0]
+        try:
+            image_tensor = process_images([image], image_processor, model.config)[0]
+        except:
+            ans_id = shortuuid.uuid()
+            ans_file.write(json.dumps({ "question_id": question_id,
+                                "prompt": cur_prompt,
+                                "text": "Failed to load image",
+                                "answer_id": ans_id,
+                                "model_id": model_name,
+                                "metadata": {}}) + "\n")
+            question_id += 1
+            continue
 
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
         keywords = [stop_str]
@@ -81,13 +97,14 @@ def eval_model(args):
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
         ans_id = shortuuid.uuid()
-        ans_file.write(json.dumps({"question_id": idx,
+        ans_file.write(json.dumps({ "question_id": question_id,
                                    "prompt": cur_prompt,
                                    "text": outputs,
                                    "answer_id": ans_id,
                                    "model_id": model_name,
                                    "metadata": {}}) + "\n")
         ans_file.flush()
+        question_id += 1
     ans_file.close()
 
 
@@ -97,7 +114,7 @@ if __name__ == "__main__":
     parser.add_argument("--model-base", type=str, default=None)
     parser.add_argument("--image-folder", type=str, default="")
     parser.add_argument("--question-file", type=str, default="tables/question.jsonl")
-    parser.add_argument("--answers-file", type=str, default="answer.jsonl")
+    parser.add_argument("--answers-file", type=str, default="llava_med_test_results.jsonl")
     parser.add_argument("--conv-mode", type=str, default="vicuna_v1")
     parser.add_argument("--num-chunks", type=int, default=1)
     parser.add_argument("--chunk-idx", type=int, default=0)

@@ -22,7 +22,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             bnb_4bit_quant_type='nf4'
         )
     else:
-        kwargs['torch_dtype'] = torch.float16
+        kwargs['torch_dtype'] = torch.bfloat16
     
     if 'llava' in model_name.lower():
         # Load LLaVA model
@@ -34,19 +34,33 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                     use_flash_attention_2=False,
                     **kwargs
                 )
+
     else:
         # Load language model
         if model_base is not None:
             # PEFT model
             from peft import PeftModel
-            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
-            model = AutoModelForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, **kwargs)
+            if 'mistral' in model_base.lower():
+                tokenizer = AutoTokenizer.from_pretrained(model_base)
+                model = LlavaMistralForCausalLM.from_pretrained(
+                    model_base,
+                    low_cpu_mem_usage=False,
+                    use_flash_attention_2=False,
+                    **kwargs
+                )
+            else:
+                tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+                model = AutoModelForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, **kwargs)
+
+            model.to(torch.bfloat16) # added
+
             print(f"Loading LoRA weights from {model_path}")
             model = PeftModel.from_pretrained(model, model_path)
             print(f"Merging weights")
             model = model.merge_and_unload()
-            print('Convert to FP16...')
-            model.to(torch.float16)
+            # print('Convert to FP16...')
+            print('Convert to BF16...')
+            model.to(torch.bfloat16)
         else:
             use_fast = False
             if 'mpt' in model_name.lower():
@@ -59,6 +73,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     image_processor = None
 
     if 'llava' in model_name.lower(): # or 'mistral' in model_name.lower():
+        print("llava in model_name")
         mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
         mm_use_im_patch_token = getattr(model.config, "mm_use_im_patch_token", True)
         if mm_use_im_patch_token:
@@ -70,9 +85,9 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         vision_tower = model.get_vision_tower()
         if not vision_tower.is_loaded:
             vision_tower.load_model()
-        vision_tower.to(device=device, dtype=torch.float16)
-        model.model.mm_projector.to(device=device, dtype=torch.float16)
-        model.to(device=device, dtype=torch.float16)
+        vision_tower.to(device=device, dtype=torch.bfloat16)
+        model.model.mm_projector.to(device=device, dtype=torch.bfloat16)
+        model.to(device=device, dtype=torch.bfloat16)
         image_processor = vision_tower.image_processor
 
     if hasattr(model.config, "max_sequence_length"):

@@ -11,6 +11,7 @@ class CLIPVisionTower(nn.Module):
         self.is_loaded = False
 
         self.vision_tower_name = vision_tower
+        # self.vision_tower = vision_tower
         self.select_layer = args.mm_vision_select_layer
         self.select_feature = getattr(args, 'mm_vision_select_feature', 'patch')
 
@@ -49,6 +50,26 @@ class CLIPVisionTower(nn.Module):
             image_features = self.feature_select(image_forward_outs).to(images.dtype)
 
         return image_features
+        # device = getattr(self, 'device', None)
+        # if device is None:
+        #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # dtype = getattr(self, 'dtype', None)
+        # if dtype is None:
+        #     dtype = torch.float32
+
+        # if type(images) is list:
+        #     image_features = []
+        #     for image in images:
+        #         image_forward_out = self.vision_tower(image.to(device=device, dtype=dtype).unsqueeze(0), output_hidden_states=True)
+        #         image_feature = self.feature_select(image_forward_out).to(image.dtype)
+        #         image_features.append(image_feature)
+        # else:
+        #     image_forward_outs = self.vision_tower(images.to(device=device, dtype=dtype), output_hidden_states=True)
+        #     image_features = self.feature_select(image_forward_outs).to(images.dtype)
+
+        # return image_features
+
 
     @property
     def dummy_feature(self):
